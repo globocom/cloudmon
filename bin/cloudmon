@@ -1,0 +1,250 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+
+import os
+import sys
+import time
+import argparse
+import traceback
+
+try:
+    from setproctitle import setproctitle
+except ImportError:
+    setproctitle = None
+
+from daemon import DaemonContext
+from daemon.pidfile import TimeoutPIDLockFile
+
+prevpath = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if os.path.exists(os.path.join(prevpath, 'cloudmon', '__init__.py')):
+    sys.path.append(prevpath)
+
+
+from cloudmon.queue import MessageQueue
+from cloudmon.utils.config import load_config
+from cloudmon.utils.log import logging
+from cloudmon.utils.log import set_loggers
+from cloudmon import __version__
+
+from cloudmon.connector.cloudstack import get_last_exec_cs
+from cloudmon.connector.cloudstack_queue import get_last_msg_cs
+from cloudmon.connector.ec2 import get_last_exec_ec2
+from cloudmon.connector.ec2_queue import get_last_msg_ec2
+
+
+def main():
+    # get virtualenv
+    if hasattr(sys, 'real_prefix'):
+        sys_prefix = sys.prefix
+    else:
+        sys_prefix = '/'
+
+    args = get_parser(sys_prefix)
+    if args['version']:
+        print '{0}'.format(__version__)
+        sys.exit(0)
+
+    if args['status']:
+        not_yet_supported()
+
+        print_status()
+        sys.exit(0)
+
+    if bool(args['timeout']) != bool(args['healthcheck']):
+        print (
+            'You need both healthcheck and timeout parameters '
+            'to perform a healthcheck'
+        )
+        sys.exit(0)
+
+    if args['healthcheck']:
+        not_yet_supported()
+
+        now = int(time.time())
+        ago = get_status(now)
+        hc_type = args['healthcheck']
+        if ago[hc_type] > args['timeout']:
+            print 1
+        else:
+            print 0
+        sys.exit(0)
+
+    # load config file
+    (config, added_fields) = load_config(args['config'])
+
+    if os.path.exists(args['pid']):
+        try:
+            stream = open(args['pid'], 'r')
+            pid = stream.read()
+            stream.close()
+        except (IOError, ValueError):
+            os.unlink(args['pid'])
+            sys.exit('Coudln\'t open pid file. Please start CloudMon again.')
+        # pid doesnt exist
+        if not os.path.exists('/'.join(['/proc', str(pid), 'cmdline'])):
+            os.unlink(args['pid'])
+        # pid exists
+        else:
+            sys.exit(
+                'pid file (%s) already exists. Server running?' % args['pid']
+            )
+
+    if not args['foreground']:
+        # pidfile = TimeoutPIDLockFile(args['pid'], 1)
+        with DaemonContext(pidfile=TimeoutPIDLockFile(args['pid'], 1), stderr=sys.stderr):
+            start_cloudmon(config, args, added_fields)
+    else:
+        start_cloudmon(config, args, added_fields)
+
+
+def get_parser(sys_prefix):
+    desc = 'CloudMon is a monitoring orchestrator for clouds'
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument(
+        '-c', '--config',
+        help='Path of the config file',
+        default=os.path.join(sys_prefix, 'etc/cloudmon/cloudmon.conf'),
+        type=str,
+    )
+    parser.add_argument(
+        '-p', '--pid',
+        help='Path of the pid file',
+        default='/tmp/cloudmon.pid',
+        type=str,
+    )
+    parser.add_argument(
+        '-v', '--version',
+        help='Shows CloudMon version',
+        default=False,
+        action='store_true',
+    )
+    parser.add_argument(
+        '-l', '--log-stdout',
+        help='Logs will be send to stdout instead of stored in files',
+        default=False,
+        action='store_true',
+    )
+    parser.add_argument(
+        '-f', '--foreground',
+        help='Run proccess in foreground',
+        default=False,
+        action='store_true',
+    )
+    parser.add_argument(
+        '-s', '--status',
+        help='Gets last status of CloudMon threads',
+        default=False,
+        action='store_true',
+    )
+    parser.add_argument(
+        '-e', '--healthcheck',
+        help='Generates healthcheck',
+        default='',
+        type=str,
+        choices=['csapi', 'ec2api', 'csqueue', 'ec2queue']
+    )
+    parser.add_argument(
+        '-t', '--timeout',
+        help='Healthcheck timeout',
+        default=0,
+        type=int,
+    )
+    return vars(parser.parse_args())
+
+
+def start_cloudmon(config, args, added_fields):
+    set_loggers(config, args['log_stdout'])
+    logger = logging.getLogger('cloudmon')
+    logger.info('Starting CloudMon...')
+    logger.info('Configurations validated with success!')
+    if added_fields:
+        logger.warning(
+            'The following required fields were not found '
+            'in the configuration file. Their default values were '
+            'added as such:\n{0}'.format(added_fields)
+        )
+    logger.info('Version {0}'.format(__version__))
+
+    # add environments
+    for key, value in config['env'].items():
+        os.environ[key] = value
+
+    address = config['cloudmon']['listen_address']
+    port = config['cloudmon']['listen_port']
+    queue = MessageQueue(config)
+    try:
+        queue.bind(address, port)
+        logger.info('Message queue is opened')
+    except Exception as e:
+        err_msg = 'Failed to bind ZeroMQ socket: %s' % str(e)
+        logger.error(err_msg)
+        sys.exit(err_msg)
+
+    # polling loop
+    while True:
+        try:
+            queue.poll()
+            time.sleep(3)
+        except (KeyboardInterrupt, SystemExit), e:
+            queue.close()
+            logger.info(
+                'Message queue is closed by %s\n\n' % e.__class__.__name__
+            )
+            break
+        # except ZMQError:
+        #     pass
+        except Exception as e:
+            logger.error(traceback.format_exc())
+
+
+def print_status():
+    now = int(time.time())
+    ago = get_status(now)
+
+    if ago['csapi'] != -1:
+        print 'Last finished CS API thread: {0} seconds ago'.format(
+            ago['csapi'])
+    else:
+        print 'No CS API thread has finished yet'
+
+    if ago['ec2api'] != -1:
+        print 'Last finished EC2 API thread: {0} seconds ago'.format(
+            ago['ec2api'])
+    else:
+        print 'No EC2 API thread has finished yet'
+
+    if ago['csqueue'] != -1:
+        print 'Last received CS Queue message : {0} seconds ago'.format(
+            ago['csqueue'])
+    else:
+        print 'No messages received from CS Queue yet'
+
+    if ago['ec2queue'] != -1:
+        print 'Last finished EC2 Queue message: {0} seconds ago'.format(
+            ago['ec2queue'])
+    else:
+        print 'No messages received from EC2 Queue yet'
+
+
+def get_status(now):
+    last = {}
+    last['csapi'] = get_last_exec_cs()
+    last['ec2api'] = get_last_exec_ec2()
+    last['csqueue'] = get_last_msg_cs()
+    last['ec2queue'] = get_last_msg_ec2()
+    for k, v in last.iteritems():
+        if v:
+            last[k] = now - v
+        else:
+            last[k] = -1
+    return last
+
+def not_yet_supported():
+    print 'Option not yet supported.'
+    sys.exit(0)
+
+if __name__ == '__main__':
+    if setproctitle:
+        setproctitle(os.path.basename(__file__))
+    main()

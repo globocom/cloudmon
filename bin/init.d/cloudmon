@@ -1,0 +1,76 @@
+#!/bin/sh
+#
+# chkconfig: - 90 10
+# description: monitoring orchestrator for clouds
+# config: /etc/cloudmon/cloudmon.conf
+# pidfile: /tmp/cloudmon.pid
+#
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+conf=/etc/conf/cloudmon.conf
+# conf = [virtual_env_path]/etc/init.d/cloudmon.conf
+lockfile=/tmp/cloudmon.lock
+pidfile=/tmp/cloudmon.pid
+user=root
+versionstr=`cloudmon -v`
+
+start()
+{
+    if status -p $pidfile ${0##*/} > /dev/null ; then
+        echo "Service ${0##*/} is already running"
+        return 0
+    else
+    	[ -f $pidfile ] && rm -f $pidfile
+        echo -n $"Starting CloudMon $versionstr: "
+        daemon --user $user --pidfile $pidfile "cloudmon -c $conf --pid $pidfile"
+        RETVAL=$?
+        echo
+        [ $RETVAL -eq 0 ] && touch $lockfile
+        return $RETVAL
+    fi
+}
+
+stop()
+{
+    echo -n $"Shutting down CloudMon: "
+    killproc -p $pidfile
+    RETVAL=$?
+    echo
+    rm -f $lockfile $pidfile
+    return $RETVAL
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status -p $pidfile ${0##*/}
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    force-reload)
+        restart
+        ;;
+    try-restart|condrestart)
+        if status -p $pidfile ${0##*/} >/dev/null ; then
+            restart
+        fi
+        ;;
+    reload)
+        action $"Service ${0##*/} does not support the reload action: " /bin/false
+        exit 3
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|status|restart|try-restart|force-reload}"
+        exit 2
+        ;;
+esac
+exit $?

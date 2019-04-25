@@ -1,0 +1,13 @@
+site_name: CloudMon
+repo_name: GitHub
+site_url: https://github.com/globocom/cloudmon
+repo_url: https://github.com/globocom/cloudmon
+theme: readthedocs
+nav:
+    - Home: index.md
+    - Installation: Installation.md
+    - Configuration: Configuration.md
+    - Managers: Managers.md
+    - Macros: Macros.md
+    - Tags: Tags.md
+    - Usage: Usage.md
