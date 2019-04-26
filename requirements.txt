@@ -10,4 +10,3 @@ pyzabbix
 redis
 boto3
 # setproctitle
-extern

@@ -27,7 +27,6 @@ requirements = [
     'pyzabbix',
     'redis',
     'boto3',
-    'extern', # readthedocs
     # 'setproctitle',
 ]
 
