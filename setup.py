@@ -16,8 +16,6 @@ with open('CHANGELOG.md') as history_file:
     history = history_file.read()
 
 requirements = [
-    'nose==1.3.7',
-    'mock==2.0.0',
     'setuptools==3.6',
     'cs==1.0.0',
     'configobj==5.0.6',
