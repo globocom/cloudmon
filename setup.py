@@ -16,17 +16,17 @@ with open('CHANGELOG.md') as history_file:
     history = history_file.read()
 
 requirements = [
-    'setuptools==3.6',
-    'cs==1.0.0',
-    'configobj==5.0.6',
-    'Cerberus==1.1',
-    'Unidecode==0.04.18',
-    'pika==0.10.0',
-    'python_daemon==2.1.2',
-    'pyzmq==16.0.2',
-    'pyzabbix==0.7.4',
-    'redis==2.10.6',
-    'boto3==1.7.80',
+    'setuptools',
+    'cs',
+    'configobj',
+    'Cerberus',
+    'Unidecode',
+    'pika',
+    'python_daemon',
+    'pyzmq',
+    'pyzabbix',
+    'redis',
+    'boto3',
     'extern', # readthedocs
     # 'setproctitle',
 ]
